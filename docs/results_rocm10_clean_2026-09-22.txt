@@ -1,0 +1,42 @@
+[PASS] amdgpu kernel module is loaded
+[PASS] /dev/kfd exists (ROCm compute stack present)
+[PASS] User is in 'render' group
+[PASS] rocminfo detects a GPU agent: gfx1103 (full log: /home/vismaya/yolo-amd-test/logs/rocminfo_default.log)
+[PASS] rocm-smi available (log: /home/vismaya/yolo-amd-test/logs/rocm-smi.log)
+[PASS] Detected iGPU: 780M (Phoenix) -> expected gfx target: gfx1103
+[PASS] PyTorch sees GPU and runs a matmul with [no_override] -> DEVICE_NAME=AMD Radeon 780M Graphics
+[FAIL] PyTorch/ROCm errored or crashed with [gfx_11.0.0_no_sdma] — see /home/vismaya/yolo-amd-test/logs/pytorch_gpu_gfx_11.0.0_no_sdma.log
+[FAIL] PyTorch/ROCm errored or crashed with [gfx_11.0.0] — see /home/vismaya/yolo-amd-test/logs/pytorch_gpu_gfx_11.0.0.log
+[FAIL] PyTorch/ROCm errored or crashed with [gfx_11.0.1_no_sdma] — see /home/vismaya/yolo-amd-test/logs/pytorch_gpu_gfx_11.0.1_no_sdma.log
+[FAIL] PyTorch/ROCm errored or crashed with [gfx_11.0.2_no_sdma] — see /home/vismaya/yolo-amd-test/logs/pytorch_gpu_gfx_11.0.2_no_sdma.log
+[FAIL] PyTorch/ROCm errored or crashed with [gfx_11.0.2] — see /home/vismaya/yolo-amd-test/logs/pytorch_gpu_gfx_11.0.2.log
+[PASS] GPU works with [no_override] (no environment overrides needed) — will use this for YOLO GPU tests below
+[PASS] [cpu/yolo11n] cold-load 967.6ms | first-infer 1052.6ms | steady-state 20.55ms avg (p95 25.53ms) | video 54.79 FPS (17.80ms/frame)
+[PASS] [cpu/yolo11s] cold-load 1004.0ms | first-infer 1090.5ms | steady-state 45.71ms avg (p95 55.23ms) | video 30.79 FPS (31.91ms/frame)
+[PASS] [cpu/yolo11m] cold-load 1027.5ms | first-infer 1227.9ms | steady-state 105.27ms avg (p95 112.39ms) | video 11.92 FPS (83.33ms/frame)
+[PASS] [cpu/yolo11l] cold-load 1094.8ms | first-infer 1179.9ms | steady-state 144.02ms avg (p95 185.68ms) | video 9.56 FPS (104.05ms/frame)
+[PASS] [cpu/yolo11x] cold-load 1151.0ms | first-infer 1368.3ms | steady-state 267.08ms avg (p95 360.88ms) | video 5.14 FPS (193.85ms/frame)
+[PASS] [cpu/yolo26n] cold-load 991.8ms | first-infer 1051.1ms | steady-state 21.17ms avg (p95 23.79ms) | video 53.06 FPS (18.30ms/frame)
+[PASS] [cpu/yolo26s] cold-load 977.1ms | first-infer 1093.4ms | steady-state 41.46ms avg (p95 45.20ms) | video 27.10 FPS (36.42ms/frame)
+[PASS] [cpu/yolo26m] cold-load 1039.4ms | first-infer 1177.2ms | steady-state 121.89ms avg (p95 155.16ms) | video 12.01 FPS (82.68ms/frame)
+[PASS] [cpu/yolo26l] cold-load 1115.9ms | first-infer 1185.1ms | steady-state 143.68ms avg (p95 183.01ms) | video 9.83 FPS (101.21ms/frame)
+[PASS] [cpu/yolo26x] cold-load 1164.3ms | first-infer 1480.9ms | steady-state 247.06ms avg (p95 270.65ms) | video 5.27 FPS (189.13ms/frame)
+[PASS] [gpu_pytorch_rocm/yolo11n] cold-load 1001.7ms | first-infer 1683.8ms | steady-state 20.03ms avg (p95 25.88ms) | video 91.46 FPS (10.56ms/frame)
+[PASS] [gpu_pytorch_rocm/yolo11s] cold-load 1015.9ms | first-infer 1743.7ms | steady-state 37.45ms avg (p95 42.80ms) | video 41.97 FPS (23.44ms/frame)
+[PASS] [gpu_pytorch_rocm/yolo11m] cold-load 1024.6ms | first-infer 1890.0ms | steady-state 82.76ms avg (p95 86.22ms) | video 16.46 FPS (60.37ms/frame)
+[PASS] [gpu_pytorch_rocm/yolo11l] cold-load 1105.8ms | first-infer 1942.7ms | steady-state 101.90ms avg (p95 107.49ms) | video 14.01 FPS (70.94ms/frame)
+[PASS] [gpu_pytorch_rocm/yolo11x] cold-load 1167.5ms | first-infer 2176.8ms | steady-state 188.25ms avg (p95 192.01ms) | video 7.80 FPS (127.76ms/frame)
+[PASS] [gpu_pytorch_rocm/yolo26n] cold-load 1008.6ms | first-infer 1681.0ms | steady-state 20.17ms avg (p95 26.52ms) | video 88.36 FPS (10.88ms/frame)
+[PASS] [gpu_pytorch_rocm/yolo26s] cold-load 1000.7ms | first-infer 1742.7ms | steady-state 37.45ms avg (p95 43.34ms) | video 40.58 FPS (24.11ms/frame)
+[PASS] [gpu_pytorch_rocm/yolo26m] cold-load 1003.7ms | first-infer 1928.2ms | steady-state 83.75ms avg (p95 88.79ms) | video 16.39 FPS (60.61ms/frame)
+[PASS] [gpu_pytorch_rocm/yolo26l] cold-load 1089.6ms | first-infer 1929.0ms | steady-state 100.70ms avg (p95 103.72ms) | video 13.98 FPS (71.06ms/frame)
+[PASS] [gpu_pytorch_rocm/yolo26x] cold-load 1187.5ms | first-infer 2161.5ms | steady-state 189.03ms avg (p95 195.51ms) | video 7.82 FPS (127.33ms/frame)
+[WARN] No ROCm/MIGraphX execution provider found in onnxruntime — only CPUExecutionProvider available. This path needs a ROCm-specific onnxruntime wheel matching your installed ROCm version (see repo.radeon.com).
+[PASS] ONNX export succeeded: /home/vismaya/yolo-amd-test/yolo11n.onnx
+[WARN] ONNX Runtime ran on CPU (CPUExecutionProvider) [yolo11n] — first-infer 21.35ms | steady-state 16.70ms/frame | video 40.82 FPS (raw tensor, no NMS). No GPU execution provider for this ROCm.
+[PASS] ONNX export succeeded: /home/vismaya/yolo-amd-test/yolo26n.onnx
+[WARN] ONNX Runtime ran on CPU (CPUExecutionProvider) [yolo26n] — first-infer 22.27ms | steady-state 13.28ms/frame | video 51.45 FPS (raw tensor, no NMS). No GPU execution provider for this ROCm.
+[PASS] Kernel 6.17 meets the >=6.10 minimum for amdxdna NPU driver
+[PASS] amdxdna module present in sysfs
+[WARN] xrt-smi not found — Ryzen AI Software / XRT NPU driver package not installed. Install guide: https://ryzenai.docs.amd.com/en/latest/linux.html (Ubuntu 24.04, kernel >=6.10, STX/KRK platforms only)
+[WARN] VitisAIExecutionProvider not available in onnxruntime. To get it: install AMD's Ryzen AI Software for Linux (https://ryzenai.docs.amd.com/en/latest/linux.html), which provides a Vitis-AI-EP-enabled onnxruntime build. Standard pip onnxruntime/onnxruntime-rocm builds do NOT include this EP.

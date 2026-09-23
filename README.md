@@ -84,6 +84,14 @@ AMD's NPU (XDNA) is **not** accessible through Ultralytics or PyTorch — there 
 
 ## One-time ROCm setup
 
+> **Read [`INSTALL_ROCM_780M.md`](INSTALL_ROCM_780M.md) first.** It records the verified
+> kernel + package combination for the 780M (gfx1103): OEM kernel 6.17 with the in-box
+> driver, **ROCm 10.0.0** (`amdrocm10.0-gfx1103`, official gfx1103 support) and PyTorch
+> `2.13.0+rocm10.0.0` with native kernels — **no `HSA_OVERRIDE_GFX_VERSION`**. It also
+> explains why the older 6.4.1 + DKMS route below produced misleading ONNX numbers.
+> The steps below and `setup.sh` are the legacy 6.4.1 procedure and are kept for reference only.
+
+
 If ROCm isn't installed yet (run once, before this script):
 
 ```bash

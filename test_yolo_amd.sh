@@ -84,7 +84,14 @@ for arg in "$@"; do
   esac
 done
 
+# Ultralytics "AutoUpdate" pip-installs anything its requirement check can't
+# find. The ROCm/MIGraphX builds of onnxruntime are distributed under other
+# distribution names, so the check fails and it silently installs the CPU
+# onnxruntime over the GPU one — every later "GPU" ONNX result is then CPU.
+export YOLO_AUTOINSTALL=False
+
 mkdir -p "$WORKDIR" "$LOGDIR"
+cp "$(dirname "$0")/bench_harness.py" "$WORKDIR/bench_harness.py"
 : > "$RESULTS_FILE"
 echo "backend,model,stage,metric,value_ms_or_fps" > "$BENCH_CSV"
 
@@ -190,25 +197,56 @@ if [ "$SKIP_INSTALL" -eq 0 ]; then
   source "$VENV_DIR/bin/activate"
   pip install --upgrade pip -q
 
-  info "Installing PyTorch (ROCm 6.4 build)..."
-  pip install torch torchvision --index-url https://download.pytorch.org/whl/rocm6.4 -q \
-    && pass "PyTorch ROCm build installed" \
+  info "Installing PyTorch (ROCm 7.1 build)..."
+  # Match the torch wheel to the system ROCm. ROCm >= 7.14 / 10.x ships
+  # per-GPU wheels with native gfx1103/115x kernels (no HSA override needed);
+  # older stacks fall back to the generic rocm wheels + HSA override.
+  # ROCm <= 7.2 records its version in /opt/rocm/.info/version; the 7.14+/10.x
+  # per-GPU packaging does not, so fall back to the amdrocm metapackage name.
+  ROCM_VER=$(cut -d- -f1 /opt/rocm/.info/version 2>/dev/null)
+  [ -z "$ROCM_VER" ] && ROCM_VER=$(dpkg-query -W -f='${Package}\n' 'amdrocm[0-9]*-gfx*' 2>/dev/null | sed -E 's/^amdrocm([0-9.]+)-gfx.*/\1/' | sort -V | tail -1)
+  ROCM_MAJOR=${ROCM_VER%%.*}
+  if [ -n "${TORCH_PIP_ARGS:-}" ]; then
+    info "Installing PyTorch with TORCH_PIP_ARGS override: $TORCH_PIP_ARGS"
+    # shellcheck disable=SC2086
+    pip install -q $TORCH_PIP_ARGS
+  elif [ "${ROCM_MAJOR:-0}" -ge 10 ]; then
+    info "System ROCm $ROCM_VER -> torch 2.13.0+rocm10.0.0 with the device package for $DETECTED_GFX"
+    pip install -q --index-url https://stable.repo.amd.com/rocm/whl-next/ \
+      "torch[device-${DETECTED_GFX}]==2.13.0+rocm10.0.0" \
+      "torchvision[device-${DETECTED_GFX}]==0.28.0+rocm10.0.0"
+  else
+    info "System ROCm ${ROCM_VER:-unknown} -> generic torch rocm7.1 wheels (gfx1103 needs HSA_OVERRIDE)"
+    pip install torch torchvision --index-url https://download.pytorch.org/whl/rocm7.1 -q
+  fi \
+    && pass "PyTorch ROCm build installed ($(python3 -c "import torch;print(torch.__version__)" 2>/dev/null))" \
     || fail "PyTorch ROCm install failed — check network / index URL"
 
-  info "Installing ultralytics..."
-  pip install ultralytics -q \
+  info "Installing ultralytics (+ onnx/onnxslim, which its ONNX export needs and can no longer auto-install)..."
+  pip install ultralytics "onnx>=1.12,<2" onnxslim -q \
     && pass "ultralytics installed" \
     || fail "ultralytics install failed"
 
-  info "Installing onnxruntime (CPU fallback, always works)..."
-  pip install onnxruntime -q \
-    && pass "onnxruntime (CPU) installed" \
-    || warn "onnxruntime CPU install failed"
-
-  info "Attempting onnxruntime-rocm install (may not have a matching wheel for your ROCm version — non-fatal if it fails)..."
-  pip install onnxruntime-rocm -q 2>>"$LOGDIR/onnxruntime_rocm_install.log" \
-    && pass "onnxruntime-rocm installed" \
-    || warn "onnxruntime-rocm not installed (see $LOGDIR/onnxruntime_rocm_install.log) — MIGraphX test (Step 4) will be skipped"
+  # Exactly ONE onnxruntime build may be present: the CPU, ROCm and MIGraphX
+  # wheels all unpack into the same onnxruntime/ directory and the last one
+  # installed wins. AMD publishes MIGraphX-EP wheels per ROCm release at
+  # repo.radeon.com (ROCm 7.2.x and older); the ROCm EP was removed in ORT 1.23.
+  # No GPU wheel exists for ROCm 7.14 / 10.x yet -> CPU only, reported as such.
+  pip uninstall -y -q onnxruntime onnxruntime-rocm onnxruntime-migraphx >/dev/null 2>&1 || true
+  ORT_GPU=0
+  if [ -n "$ROCM_VER" ] && [ "${ROCM_MAJOR:-0}" -lt 10 ] && [ "${ROCM_MAJOR:-0}" -ge 6 ]; then
+    ORT_INDEX="https://repo.radeon.com/rocm/manylinux/rocm-rel-${ROCM_VER%.*}/"
+    info "Trying the AMD onnxruntime-migraphx wheel for ROCm ${ROCM_VER%.*} from $ORT_INDEX ..."
+    if pip install -q onnxruntime-migraphx -f "$ORT_INDEX" 2>>"$LOGDIR/onnxruntime_rocm_install.log"; then
+      pip install -q "numpy<2" >/dev/null 2>&1   # AMD's ORT wheels are built against numpy 1.x
+      ORT_GPU=1; pass "onnxruntime-migraphx (GPU) installed for ROCm ${ROCM_VER%.*}"
+    fi
+  fi
+  if [ "$ORT_GPU" -eq 0 ]; then
+    pip install onnxruntime -q \
+      && warn "No AMD GPU onnxruntime wheel for ROCm ${ROCM_VER:-?} — installed CPU onnxruntime; Step 4 measures ONNX on the CPU only." \
+      || warn "onnxruntime CPU install failed"
+  fi
 else
   # shellcheck disable=SC1091
   source "$VENV_DIR/bin/activate"
@@ -234,7 +272,7 @@ fi
 # YOLO11 and YOLO26 families (nano/small/medium each) so the benchmark
 # tables directly compare the two generations. --quick trims to nano only
 # from each family to save time/bandwidth — see arg parsing near top.
-declare -a BENCH_MODEL_NAMES=("yolo11n" "yolo11s" "yolo11m" "yolo26n" "yolo26s" "yolo26m")
+declare -a BENCH_MODEL_NAMES=("yolo11n" "yolo11s" "yolo11m" "yolo11l" "yolo11x" "yolo26n" "yolo26s" "yolo26m" "yolo26l" "yolo26x")
 if [ "$QUICK_MODE" -eq 1 ]; then
   BENCH_MODEL_NAMES=("yolo11n" "yolo26n")
 fi
@@ -322,6 +360,7 @@ declare -a OVERRIDE_ENVS=(
 info "Detected chip suggests target $DETECTED_GFX — all combos below will still be tried since actual ROCm-version behavior varies."
 
 WORKING_OVERRIDE=""
+GPU_OK=0   # separate flag: "no_override" is a valid winner but its env string is empty
 
 for i in "${!OVERRIDE_LABELS[@]}"; do
   LABEL="${OVERRIDE_LABELS[$i]}"
@@ -347,7 +386,7 @@ PYEOF
 
   if echo "$OUT" | grep -q "CUDA_AVAILABLE=True" && echo "$OUT" | grep -q "MATMUL_OK="; then
     pass "PyTorch sees GPU and runs a matmul with [$LABEL] -> $(echo "$OUT" | grep DEVICE_NAME)"
-    [ -z "$WORKING_OVERRIDE" ] && WORKING_OVERRIDE="$ENVSET"
+    if [ "$GPU_OK" -eq 0 ]; then GPU_OK=1; WORKING_OVERRIDE="$ENVSET"; WORKING_LABEL="$LABEL"; fi
   elif echo "$OUT" | grep -q "CUDA_AVAILABLE=False"; then
     warn "PyTorch does NOT see GPU with [$LABEL] (falls back to CPU-only)"
   else
@@ -355,8 +394,8 @@ PYEOF
   fi
 done
 
-if [ -n "$WORKING_OVERRIDE" ]; then
-  pass "Found a working override combo: '$WORKING_OVERRIDE' — will use this for YOLO GPU tests below"
+if [ "$GPU_OK" -eq 1 ]; then
+  pass "GPU works with [$WORKING_LABEL] (${WORKING_OVERRIDE:-no environment overrides needed}) — will use this for YOLO GPU tests below"
 else
   warn "No override combo got PyTorch to see the GPU. GPU-based YOLO tests below will be skipped; CPU and (if available) ONNX/MIGraphX tests will still run."
 fi
@@ -425,8 +464,8 @@ for m in "${BENCH_MODEL_NAMES[@]}"; do
   run_benchmark "cpu" "cpu" "" "$m"
 done
 
-# --- GPU benchmarks (only if Step 2 found a working override) ---
-if [ -n "$WORKING_OVERRIDE" ]; then
+# --- GPU benchmarks (only if Step 2 found a working combo) ---
+if [ "$GPU_OK" -eq 1 ]; then
   for m in "${BENCH_MODEL_NAMES[@]}"; do
     run_benchmark "gpu_pytorch_rocm" "0" "$WORKING_OVERRIDE" "$m"
   done
@@ -435,6 +474,54 @@ else
 fi
 
 # ==================================================================
+# ---------------------------------------------------------------------------
+# STEP 3b: prove the GPU actually ran the work, and compare backends fairly.
+#
+# Every runtime here will silently fall back to the CPU when something is wrong
+# while still reporting "GPU". accel_verify.py reads the kernel's own
+# per-process DRM accounting, so the claim can be checked against the hardware.
+# ---------------------------------------------------------------------------
+section "STEP 3b: hardware verification + fair backend comparison"
+
+LIBDIR="$(cd "$(dirname "$0")" && pwd)/lib"
+cp -f "$LIBDIR"/accel_verify.py "$LIBDIR"/fairness.py "$LIBDIR"/fair_compare.py "$WORKDIR/" 2>/dev/null || true
+
+if [ "$GPU_OK" -eq 1 ]; then
+  info "Running GPU inference while watching the kernel's DRM counters..."
+  ( cd "$WORKDIR" && env $WORKING_OVERRIDE python3 - <<'PYINNER' >/dev/null 2>&1 &
+import time
+import numpy as np
+import torch
+from ultralytics import YOLO
+net = YOLO("yolo11n.pt").model.to("cuda").eval()
+x = torch.from_numpy(np.random.rand(1, 3, 640, 640).astype(np.float32)).to("cuda")
+end = time.time() + 14
+with torch.inference_mode():
+    while time.time() < end:
+        net(x)
+        torch.cuda.synchronize()
+PYINNER
+  ) &
+  sleep 5
+  INFER_PID=$(pgrep -n -f "python3 -$" 2>/dev/null || pgrep -n python3)
+  if [ -n "$INFER_PID" ] && python3 "$WORKDIR/accel_verify.py" --pid "$INFER_PID" --seconds 5 > "$LOGDIR/accel_verify.log" 2>&1; then
+    pass "GPU verified against kernel counters: $(grep -oE 'compute [0-9.]+%|enc [0-9.]+%' "$LOGDIR/accel_verify.log" | paste -sd' ' -)"
+  else
+    warn "Could not prove GPU activity from kernel counters (see $LOGDIR/accel_verify.log). PyTorch reported a GPU but no DRM engine showed work - treat the GPU numbers as unproven."
+  fi
+  wait 2>/dev/null || true
+else
+  info "Skipping hardware verification - no working GPU backend found in Step 2"
+fi
+
+info "Fair backend comparison (isolated, interleaved rounds, spread reported)..."
+if ( cd "$WORKDIR" && env $WORKING_OVERRIDE python3 fair_compare.py --model yolo11n --workdir "$WORKDIR" --csv "$BENCH_CSV" > "$LOGDIR/fair_compare.log" 2>&1 ); then
+  pass "Fair comparison complete (full table in $LOGDIR/fair_compare.log)"
+  sed -n '/^backend/,/^$/p' "$LOGDIR/fair_compare.log" | head -12
+else
+  warn "Fair comparison failed - see $LOGDIR/fair_compare.log"
+fi
+
 section "STEP 4: YOLO inference — ONNX Runtime + ROCm/MIGraphX backend"
 # ==================================================================
 
@@ -477,11 +564,9 @@ PYEOF
     fi
     pass "ONNX export succeeded: $MODEL_ONNX"
 
-    if ! grep -q "ROCMExecutionProvider\|MIGraphXExecutionProvider" "$LOGDIR/ort_providers.log"; then
-      continue  # EP unavailable, skip the actual inference test for this model
-    fi
-
-    info "Running ONNX inference for ${onnx_model_name} via ROCm/MIGraphX EP (raw tensor timing + video FPS)..."
+    # Run regardless of which EP exists — the result line names the EP that
+    # really executed, so a CPU-only onnxruntime is reported as CPU, never as GPU.
+    info "Running ONNX inference for ${onnx_model_name} (best available EP; raw tensor timing + video FPS)..."
     OUT=$(python3 - "$MODEL_ONNX" "$TEST_VIDEO" <<'PYEOF' 2>&1
 import sys
 import time
@@ -494,7 +579,9 @@ model_onnx, video_path = sys.argv[1], sys.argv[2]
 providers = ort.get_available_providers()
 ep = "MIGraphXExecutionProvider" if "MIGraphXExecutionProvider" in providers else "ROCMExecutionProvider"
 
-sess = ort.InferenceSession(model_onnx, providers=[ep, "CPUExecutionProvider"])
+so = ort.SessionOptions(); so.log_severity_level = 3
+sess = ort.InferenceSession(model_onnx, so, providers=[ep, "CPUExecutionProvider"])
+ep = sess.get_providers()[0]   # what actually ran, not what was asked for
 input_name = sess.get_inputs()[0].name
 input_shape = sess.get_inputs()[0].shape
 shape = [d if isinstance(d, int) else 1 for d in input_shape]
@@ -550,14 +637,18 @@ PYEOF
       FIRST=$(echo "$OUT" | grep "^FIRST_INFER_MS=" | cut -d= -f2)
       EP=$(echo "$OUT" | grep "^EP_USED=" | cut -d= -f2)
       VFPS=$(echo "$OUT" | grep "^VIDEO_AVG_FPS=" | cut -d= -f2)
-      pass "ONNX Runtime GPU (${EP}) [$onnx_model_name] — first-infer ${FIRST}ms | steady-state ${AVG}ms/frame | video ${VFPS:-N/A} FPS (raw tensor, no NMS)"
+      if [ "$EP" = "CPUExecutionProvider" ]; then
+        warn "ONNX Runtime ran on CPU (${EP}) [$onnx_model_name] — first-infer ${FIRST}ms | steady-state ${AVG}ms/frame | video ${VFPS:-N/A} FPS (raw tensor, no NMS). No GPU execution provider for this ROCm."
+      else
+        pass "ONNX Runtime GPU (${EP}) [$onnx_model_name] — first-infer ${FIRST}ms | steady-state ${AVG}ms/frame | video ${VFPS:-N/A} FPS (raw tensor, no NMS)"
+      fi
       {
         echo "onnx_${EP},${onnx_model_name},first_infer,ms,$FIRST"
         echo "onnx_${EP},${onnx_model_name},steady_avg,ms,$AVG"
         [ -n "$VFPS" ] && echo "onnx_${EP},${onnx_model_name},video,fps,$VFPS"
       } >> "$BENCH_CSV"
     else
-      fail "ONNX Runtime GPU inference failed for $onnx_model_name — see $LOGDIR/yolo_onnx_rocm_${onnx_model_name}.log"
+      fail "ONNX Runtime inference failed for $onnx_model_name — see $LOGDIR/yolo_onnx_rocm_${onnx_model_name}.log"
     fi
   done
 fi
@@ -712,9 +803,14 @@ ENV_FILE="$WORKDIR/yolo_amd_env.sh"
 echo "# Auto-generated by test_yolo_amd.sh on $(date)" >> "$ENV_FILE"
 echo "# Source this before running YOLO: source $ENV_FILE" >> "$ENV_FILE"
 
-if [ -n "$WORKING_OVERRIDE" ] && grep -q "gpu_pytorch_rocm/" "$RESULTS_FILE"; then
+if [ "$GPU_OK" -eq 1 ] && grep -q "gpu_pytorch_rocm/" "$RESULTS_FILE"; then
   echo -e "${GREEN}RECOMMENDATION:${NC} Use PyTorch/ROCm backend."
-  echo "Required exports (written to $ENV_FILE):"
+  if [ -z "$WORKING_OVERRIDE" ]; then
+    echo "  No HSA_OVERRIDE_GFX_VERSION needed — this ROCm/torch build has native kernels for your GPU."
+    echo "# No HSA overrides needed: native GPU support in this ROCm/torch build." >> "$ENV_FILE"
+  else
+    echo "Required exports (written to $ENV_FILE):"
+  fi
   for kv in $WORKING_OVERRIDE; do
     echo "  export $kv"
     echo "export $kv" >> "$ENV_FILE"
